@@ -1,0 +1,5 @@
+{
+  "//": "Publish build: same as tsconfig.json but excludes tests so dist/ ships no *.test.js. The plain tsconfig.json still compiles tests for `npm test`/typecheck.",
+  "extends": "./tsconfig.json",
+  "exclude": ["src/**/*.test.ts"]
+}

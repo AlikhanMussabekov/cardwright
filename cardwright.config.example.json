@@ -1,0 +1,39 @@
+{
+  "concurrency": 1,
+  "pollIntervalSec": 45,
+  "workRoot": "~/Library/Application Support/cardwright/scratch",
+  "projectsRoot": "~/Projects",
+  "telegramChatId": "<your-telegram-chat-id>",
+  "repos": {
+    "my-app": {
+      "defaultBranch": "main",
+      "installCmd": "npm install",
+      "testCmd": "npm test",
+      "lintCmd": "",
+      "buildCmd": "npm run build",
+      "validationCmds": ["npm run typecheck"],
+      "autoMerge": false,
+      "requiredChecks": [],
+      "protectedBranch": false,
+      "deployMode": "pr-only",
+      "mergeMethod": "merge",
+      "allowedPaths": ["**"],
+      "model": "claude-opus-4-8",
+      "maxBudgetUsd": 15,
+      "maxFixAttempts": 5,
+      "timeoutSec": 1800,
+      "dailyCostCapUsd": 100,
+      "board": {
+        "boardId": "<trello-board-id>",
+        "lists": {
+          "ready": "<list-id>",
+          "inProgress": "<list-id>",
+          "review": "<list-id>",
+          "done": "<list-id>",
+          "needsHuman": "<list-id>"
+        },
+        "processedLabelId": "<label-id>"
+      }
+    }
+  }
+}

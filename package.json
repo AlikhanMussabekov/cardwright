@@ -1,0 +1,46 @@
+{
+  "name": "cardwright",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Trello-driven autonomous Claude Code pipeline — a card becomes a reviewed pull request, no CLI.",
+  "keywords": [
+    "trello",
+    "claude",
+    "claude-code",
+    "codex",
+    "autonomous-agent",
+    "ai-agent",
+    "kanban",
+    "pull-request",
+    "cli",
+    "daemon"
+  ],
+  "homepage": "https://github.com/AlikhanMussabekov/cardwright#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AlikhanMussabekov/cardwright.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AlikhanMussabekov/cardwright/issues"
+  },
+  "author": "Alikhan Mussabekov",
+  "license": "Apache-2.0",
+  "bin": { "cardwright": "dist/cli.js" },
+  "files": ["dist"],
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "test": "node --disable-warning=ExperimentalWarning --test",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "setup": "node --disable-warning=ExperimentalWarning src/cli.ts setup",
+    "daemon": "node --disable-warning=ExperimentalWarning src/cli.ts daemon",
+    "verify-pack": "bash scripts/verify-pack.sh",
+    "prepublishOnly": "npm run build && npm test"
+  },
+  "comment": "Zero runtime deps by design: Node built-ins only (fetch, node:sqlite, child_process). grammy/bottleneck/p-queue replaced by raw fetch + a small in-house limiter + sequential execution (concurrency:1). CLI-only: `bin`, no `main` (no programmatic API surface).",
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^24",
+    "typescript": "^5.7.0"
+  }
+}
