@@ -63,7 +63,8 @@ ANTHROPIC_API_KEY=
 function scaffoldEnvAndExit(): never {
   const target = resolve(process.cwd(), ".env");
   // We are only here because .env is absent, so this never clobbers an existing file.
-  writeFileSync(target, ENV_TEMPLATE);
+  // 0600: the user is about to fill in secrets — keep them out of other local users' reach.
+  writeFileSync(target, ENV_TEMPLATE, { mode: 0o600 });
   // Keep secrets out of git, but only if this is actually a repo.
   try {
     if (existsSync(".git")) {

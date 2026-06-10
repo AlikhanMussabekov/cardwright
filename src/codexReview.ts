@@ -28,10 +28,14 @@ export interface CodexVerdict {
   reason?: string;
 }
 
-/** Count [P1]/[P2] markers; any [P1] fails the gate. */
+/**
+ * Count [P1]/[P2] markers; any [P1] fails the gate. Only LINE-ANCHORED markers
+ * count — a "[P1]" quoted mid-sentence (echoed instructions, or a reviewed diff
+ * that itself contains the literal) must not trip the gate.
+ */
 export function parseCodexVerdict(output: string): { gate: Gate; p1: number; p2: number } {
-  const p1 = (output.match(/\[P1\]/g) ?? []).length;
-  const p2 = (output.match(/\[P2\]/g) ?? []).length;
+  const p1 = (output.match(/^\s*\[P1\]/gm) ?? []).length;
+  const p2 = (output.match(/^\s*\[P2\]/gm) ?? []).length;
   return { gate: p1 > 0 ? "fail" : "pass", p1, p2 };
 }
 
@@ -50,9 +54,9 @@ export function buildReviewPrompt(opts: {
     "",
     "You are a strict, terse reviewer GATING this change before it is pushed. Review the diff for " +
       "correctness bugs, security holes, data-loss/race conditions, and whether it satisfies the " +
-      "acceptance criteria. Mark each finding [P1] (must-fix; blocks the push) or [P2] (advisory). " +
-      "Emit NO [P1] markers if there is nothing that must be fixed. Be specific (file:line, the flaw, " +
-      "the fix). No compliments.",
+      "acceptance criteria. Mark each finding [P1] (must-fix; blocks the push) or [P2] (advisory); " +
+      "each finding must START its own line with the marker. Emit NO [P1] markers if there is nothing " +
+      "that must be fixed. Be specific (file:line, the flaw, the fix). No compliments.",
     truncated ? "NOTE: the diff was truncated for size; review what is shown." : "",
     "",
     "ACCEPTANCE CRITERIA:",

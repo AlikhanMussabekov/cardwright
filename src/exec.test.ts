@@ -39,6 +39,18 @@ test("surfaces a spawn error for a missing binary", async () => {
   assert.match(r.stderr, /spawn error/);
 });
 
+test("missing binary with stdin input still resolves with a spawn error (no crash)", async () => {
+  const r = await run("this-binary-does-not-exist-xyz", [], { input: "abc" });
+  assert.equal(r.code, null);
+  assert.match(r.stderr, /spawn error/);
+});
+
+test("maxBuffer caps captured output and marks the truncation", async () => {
+  const r = await run("node", ["-e", "process.stdout.write('x'.repeat(100000))"], { maxBuffer: 1000 });
+  assert.ok(r.stdout.length <= 1000 + 20, `stdout kept ${r.stdout.length} chars`);
+  assert.match(r.stdout, /\[truncated\]/);
+});
+
 test("onLine emits one complete line at a time, joins across chunks, flushes the tail", async () => {
   const lines: string[] = [];
   // two writes: 'a\\nb' then 'c\\nd' → lines a, bc (joined across the chunk boundary), d (flushed)
@@ -61,6 +73,17 @@ test("scopedEnv keeps the safe base, drops app secrets, includes granted extras"
     if (process.env.PATH) assert.equal(env.PATH, process.env.PATH, "PATH (base) is preserved");
   } finally {
     delete process.env.TWR_TEST_SECRET;
+  }
+});
+
+test("scopedEnv does not pass NODE_PATH (module-injection surface)", () => {
+  const prev = process.env.NODE_PATH;
+  process.env.NODE_PATH = "/tmp/evil-modules";
+  try {
+    assert.equal(scopedEnv().NODE_PATH, undefined);
+  } finally {
+    if (prev === undefined) delete process.env.NODE_PATH;
+    else process.env.NODE_PATH = prev;
   }
 });
 

@@ -67,6 +67,7 @@ export interface Secrets {
 
 const LIST_KEYS = ["ready", "inProgress", "review", "done", "needsHuman"] as const;
 const DEPLOY_MODES: DeployMode[] = ["merge-to-main", "pr-only", "ff-only"];
+const MERGE_METHODS = ["merge", "squash", "rebase"];
 
 function asObject(v: unknown, where: string): Record<string, unknown> {
   if (typeof v !== "object" || v === null || Array.isArray(v)) {
@@ -123,6 +124,10 @@ function parseRepo(name: string, raw: unknown, projectsRoot: string): RepoConfig
   if (!DEPLOY_MODES.includes(deployMode)) {
     throw new Error(`config: repos.${name}.deployMode must be one of ${DEPLOY_MODES.join(", ")}`);
   }
+  const mergeMethod = strOr(r.mergeMethod, "merge");
+  if (!MERGE_METHODS.includes(mergeMethod)) {
+    throw new Error(`config: repos.${name}.mergeMethod must be one of ${MERGE_METHODS.join(", ")}`);
+  }
   // repoPath defaults to <projectsRoot>/<name> (strict: board name == folder == config key).
   const repoPath =
     typeof r.repoPath === "string" && r.repoPath.length > 0
@@ -140,7 +145,7 @@ function parseRepo(name: string, raw: unknown, projectsRoot: string): RepoConfig
     requiredChecks: strArr(r.requiredChecks),
     protectedBranch: boolOr(r.protectedBranch, false),
     deployMode,
-    mergeMethod: strOr(r.mergeMethod, "merge"),
+    mergeMethod,
     allowedPaths: strArr(r.allowedPaths).length ? strArr(r.allowedPaths) : ["**"],
     model: strOr(r.model, "claude-opus-4-8"),
     maxBudgetUsd: numOr(r.maxBudgetUsd, 15),
