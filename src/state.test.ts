@@ -47,7 +47,7 @@ test("pr_open frees the repo lock so the next card can run", () => {
   s.ingest({ cardId: "c2", contentHash: "h1", ...base }, 2);
   const j1 = s.claim("org/repo", 10, 1000);
   assert.ok(j1);
-  s.markRunning(j1, "run1", "tw/b1/c1/r1", 11);
+  s.markRunning(j1, "run1", "tw/b1/c1/r1", 11, 1000);
   s.markPrOpen(j1, "https://gh/pr/1", 1, 0.5, 12);
   assert.equal(s.get("c1", "h1")?.state, "pr_open");
   const j2 = s.claim("org/repo", 13, 1000);
@@ -61,7 +61,7 @@ test("reclaimExpired requeues under maxAttempts, abandons at/over", () => {
   s.ingest({ cardId: "c1", contentHash: "h1", ...base }, 1);
   const j = s.claim("org/repo", 10, 100); // lease_until=110, attempts=1
   assert.ok(j);
-  s.markRunning(j, "r", "b", 11);
+  s.markRunning(j, "r", "b", 11, 100); // run lease → 111
   assert.equal(s.reclaimExpired(50, 3), 0); // not expired
   assert.equal(s.reclaimExpired(200, 3), 1); // expired, attempts 1 < 3 → requeue
   assert.equal(s.get("c1", "h1")?.state, "queued");
@@ -101,6 +101,28 @@ test("project session get/set round-trips", () => {
   assert.equal(s.getSession("my-app"), "uuid-1");
   s.setSession("my-app", "uuid-2", 2);
   assert.equal(s.getSession("my-app"), "uuid-2");
+  s.close();
+});
+
+test("markRunning extends the lease to cover a full multi-attempt run", () => {
+  const s = mk();
+  s.ingest({ cardId: "c1", contentHash: "h1", ...base }, 1);
+  const j = s.claim("org/repo", 10, 100); // claim lease → 110
+  assert.ok(j);
+  s.markRunning(j, "r", "b", 11, 10_000); // run lease → 10_011
+  assert.equal(s.reclaimExpired(200, 3), 0); // would have expired under the claim lease alone
+  assert.equal(s.get("c1", "h1")?.state, "running");
+  s.close();
+});
+
+test("markRunning refuses to resurrect a job that is no longer claimed", () => {
+  const s = mk();
+  s.ingest({ cardId: "c1", contentHash: "h1", ...base }, 1);
+  const j = s.claim("org/repo", 10, 100);
+  assert.ok(j);
+  assert.equal(s.reclaimExpired(200, 3), 1); // lease expired → requeued
+  s.markRunning(j, "r", "b", 300, 10_000);
+  assert.equal(s.get("c1", "h1")?.state, "queued"); // NOT flipped back to running
   s.close();
 });
 

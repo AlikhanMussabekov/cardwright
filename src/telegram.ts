@@ -53,17 +53,21 @@ export class TelegramClient {
           link_preview_options: { is_disabled: true },
         }),
       });
-      const data = (await res.json()) as {
-        ok: boolean;
-        description?: string;
-        parameters?: { retry_after?: number };
-      };
-      if (data.ok) return;
-      if (res.status === 429 && data.parameters?.retry_after && attempt < 5) {
-        await sleep((data.parameters.retry_after || 1) * 1000);
+      // A proxy/gateway error returns a non-JSON body — surface the HTTP status
+      // instead of letting res.json() throw an opaque SyntaxError.
+      type TgResponse = { ok?: boolean; description?: string; parameters?: { retry_after?: number } };
+      let data: TgResponse | null = null;
+      try {
+        data = (await res.json()) as TgResponse;
+      } catch {
+        data = null;
+      }
+      if (data?.ok) return;
+      if (res.status === 429 && data?.parameters?.retry_after && attempt < 5) {
+        await sleep((data.parameters!.retry_after || 1) * 1000);
         continue;
       }
-      throw new Error(`Telegram sendMessage failed: ${data.description ?? res.status}`);
+      throw new Error(`Telegram sendMessage failed: ${data?.description ?? `HTTP ${res.status}`}`);
     }
   }
 }

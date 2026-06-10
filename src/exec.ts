@@ -82,14 +82,22 @@ export function run(cmd: string, args: string[], opts: RunOptions = {}): Promise
         }, opts.timeoutMs)
       : null;
 
+    // Append capped at maxBuffer exactly (never a whole runaway chunk past the limit),
+    // with a one-time marker so truncation is visible downstream, not silent.
+    const appendCapped = (cur: string, s: string): string => {
+      if (cur.length >= maxBuffer) return cur;
+      const rem = maxBuffer - cur.length;
+      return rem >= s.length ? cur + s : cur + s.slice(0, rem) + "\n[truncated]";
+    };
+
     child.stdout.on("data", (d: Buffer) => {
       const s = d.toString();
-      if (stdout.length < maxBuffer) stdout += s;
+      stdout = appendCapped(stdout, s);
       emitLines(s, "stdout");
     });
     child.stderr.on("data", (d: Buffer) => {
       const s = d.toString();
-      if (stderr.length < maxBuffer) stderr += s;
+      stderr = appendCapped(stderr, s);
       emitLines(s, "stderr");
     });
 
@@ -110,6 +118,10 @@ export function run(cmd: string, args: string[], opts: RunOptions = {}): Promise
       finish(null, null);
     });
 
+    // A failed spawn (missing binary) destroys stdin; without a listener the queued
+    // write's EPIPE becomes an uncaught exception. The spawn error itself still
+    // surfaces via the child's 'error' handler above.
+    child.stdin.on("error", () => {});
     if (opts.input != null) child.stdin.write(opts.input);
     child.stdin.end();
   });
@@ -129,7 +141,7 @@ export function ok(r: RunResult): boolean {
 const SAFE_ENV_KEYS = [
   "PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LANGUAGE", "LC_ALL", "LC_CTYPE",
   "TMPDIR", "TEMP", "TMP", "TERM", "TZ", "COLUMNS", "LINES", "PWD",
-  "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "SSH_AUTH_SOCK", "NODE_PATH",
+  "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_DATA_HOME", "SSH_AUTH_SOCK",
 ];
 
 /**

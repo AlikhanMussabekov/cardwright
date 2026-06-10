@@ -121,6 +121,14 @@ export function isTrelloCredentialHost(url: string): boolean {
   return host === "trello.com" || host === "api.trello.com" || host.endsWith(".trello.com");
 }
 
+/** Seconds to back off per a 429 Retry-After header: numeric values clamped to >=1s
+ * (a `Retry-After: 0` must never mean "retry instantly"), anything else → 2s. */
+export function retryAfterSeconds(header: string | null): number {
+  if (!header) return 2;
+  const n = Number(header);
+  return Number.isFinite(n) ? Math.max(1, n) : 2; // HTTP-date form → default
+}
+
 /** Highest action id across a feed (ids are lexicographically monotonic in Trello). */
 export function maxActionId(actions: TrelloAction[]): string | null {
   let max: string | null = null;
@@ -164,8 +172,7 @@ export class TrelloClient {
       const res = await fetch(url, { method });
       if (res.status === 429) {
         if (attempt >= 5) throw new Error(`Trello ${method} ${path} rate-limited after ${attempt} retries`);
-        const ra = Number(res.headers.get("retry-after") || "2");
-        await sleep((Number.isFinite(ra) ? ra : 2) * 1000);
+        await sleep(retryAfterSeconds(res.headers.get("retry-after")) * 1000);
         continue;
       }
       const body = await res.text();

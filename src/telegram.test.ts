@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { escapeHtml, chunkText } from "./telegram.ts";
+import { escapeHtml, chunkText, TelegramClient } from "./telegram.ts";
 
 test("escapeHtml escapes only & < >", () => {
   assert.equal(escapeHtml("a & b < c > d"), "a &amp; b &lt; c &gt; d");
@@ -24,4 +24,17 @@ test("chunkText hard-cuts when there is no newline near the limit", () => {
   const parts = chunkText(text, 7);
   assert.ok(parts.every((p) => p.length <= 7));
   assert.equal(parts.join(""), text);
+});
+
+test("send surfaces the HTTP status when the response body is not JSON (proxy 502)", async () => {
+  const orig = globalThis.fetch;
+  globalThis.fetch = (async () => new Response("<html>bad gateway</html>", { status: 502 })) as typeof fetch;
+  try {
+    await assert.rejects(
+      () => new TelegramClient("tok", "chat").send("hi"),
+      /Telegram sendMessage failed: HTTP 502/,
+    );
+  } finally {
+    globalThis.fetch = orig;
+  }
 });

@@ -82,12 +82,21 @@ async function processJob(ctx: Ctx, repoKey: string, repo: RepoConfig, job: { ca
   const runId = genRunId();
   const branch = branchName(repo.board.boardId, job.cardId, runId);
   const tag = job.cardId.slice(0, 6);
-  const log = (m: string) => console.log(`${nowIso()} [${tag}] ${m}`);
+  // Failed-command tails and worker text flow through here — scrub credentials
+  // before they reach the local log too, not just Trello/Telegram.
+  const log = (m: string) => console.log(`${nowIso()} [${tag}] ${ctx.redact(m)}`);
   const attachDir = join(ctx.workRoot, ".attachments", `${job.cardId.slice(0, 8)}-${runId}`);
   const imagePaths: string[] = [];
 
   try {
-    ctx.state.markRunning(key, runId, branch, Date.now());
+    // The claim lease only covers claim→start; a full run (up to maxFixAttempts worker
+    // rounds + verify + Codex) needs its own window, or a crash-recovery reclaim could
+    // requeue a job mid-run once execution is ever parallel.
+    const runLeaseMs = (repo.maxFixAttempts + 1) * repo.timeoutSec * 1000 + 120_000;
+    if (!ctx.state.markRunning(key, runId, branch, Date.now(), runLeaseMs)) {
+      log("job was no longer claimed (reclaimed?) — skipping");
+      return;
+    }
     await ctx.trello.moveCard(job.cardId, lists.inProgress);
     await ctx.trello.commentCard(job.cardId, "🤖 cardwright started on this card.");
     const card = await ctx.trello.getCard(job.cardId);
@@ -114,30 +123,41 @@ async function processJob(ctx: Ctx, repoKey: string, repo: RepoConfig, job: { ca
     // the run ends up using (it may have been (re)created during the run).
     const existingSession = ctx.state.getSession(repoKey);
     const session = existingSession ? { id: existingSession, exists: true } : { id: randomUUID(), exists: false };
-    const outcome = await runCard(card, repo, ctx.workRoot, runId, imagePaths, session, { log });
+    const outcome = await runCard(card, repo, ctx.workRoot, runId, imagePaths, session, { log, redact: ctx.redact });
     ctx.state.setSession(repoKey, outcome.sessionId, Date.now());
 
+    // Record the outcome in durable state FIRST; reporting (Trello/Telegram) is
+    // best-effort and must never flip an already-recorded outcome — a transient
+    // notification failure is not a job failure.
     if (outcome.status === "pr_open") {
       ctx.state.markPrOpen(key, outcome.prUrl!, outcome.prNumber!, outcome.costUsd, Date.now());
-      await ctx.trello.moveCard(job.cardId, lists.review);
-      await ctx.trello.attachUrl(job.cardId, outcome.prUrl!, `PR #${outcome.prNumber}`);
-      await ctx.trello.commentCard(
-        job.cardId,
-        ctx.redact(`✅ PR opened: ${outcome.prUrl}\nCodex review: ${outcome.codex?.p1 ?? 0} P1 / ${outcome.codex?.p2 ?? 0} P2 · ${outcome.attempts} attempt(s) · cost $${outcome.costUsd.toFixed(4)}\n\n${outcome.summary}`).slice(0, 16000),
-      );
-      await ctx.trello.addLabel(job.cardId, repo.board.processedLabelId).catch(() => {});
-      await ctx.telegram.send(ctx.redact(`<b>PR ready for review</b> ✅\n${escapeHtml(card.name)}\n${outcome.prUrl}\n${outcome.attempts} attempt(s) · cost $${outcome.costUsd.toFixed(4)}`));
+      try {
+        await ctx.trello.moveCard(job.cardId, lists.review);
+        await ctx.trello.attachUrl(job.cardId, outcome.prUrl!, `PR #${outcome.prNumber}`);
+        await ctx.trello.commentCard(
+          job.cardId,
+          ctx.redact(`✅ PR opened: ${outcome.prUrl}\nCodex review: ${outcome.codex?.p1 ?? 0} P1 / ${outcome.codex?.p2 ?? 0} P2 · ${outcome.attempts} attempt(s) · cost $${outcome.costUsd.toFixed(4)}\n\n${outcome.summary}`).slice(0, 16000),
+        );
+        await ctx.trello.addLabel(job.cardId, repo.board.processedLabelId).catch(() => {});
+        await ctx.telegram.send(ctx.redact(`<b>PR ready for review</b> ✅\n${escapeHtml(card.name)}\n${outcome.prUrl}\n${outcome.attempts} attempt(s) · cost $${outcome.costUsd.toFixed(4)}`));
+      } catch (e) {
+        log(`PR opened but reporting failed (state is recorded; check the board): ${e instanceof Error ? e.message : e}`);
+      }
       log(`done → ${outcome.prUrl}`);
     } else {
       ctx.state.markTerminal(key, "terminal_failure", { lastError: outcome.reason, costUsd: outcome.costUsd, prUrl: outcome.prUrl, prNumber: outcome.prNumber }, Date.now());
-      await ctx.trello.moveCard(job.cardId, lists.needsHuman);
-      if (outcome.prUrl) await ctx.trello.attachUrl(job.cardId, outcome.prUrl, `Draft PR #${outcome.prNumber}`);
-      const draft = outcome.prUrl ? `\nDraft PR (work preserved): ${outcome.prUrl}` : "";
-      const codex = outcome.codex?.output ? `\n\nCodex:\n${outcome.codex.output.slice(0, 1500)}` : "";
-      await ctx.trello.commentCard(job.cardId, ctx.redact(`❌ Could not complete: ${outcome.reason}${draft}${codex}`).slice(0, 16000));
-      await ctx.telegram.send(
-        ctx.redact(`<b>Needs human</b> ⚠️\n${escapeHtml(card.name)}\n${escapeHtml(outcome.reason ?? "")}${outcome.prUrl ? `\nDraft: ${outcome.prUrl}` : ""}`),
-      );
+      try {
+        await ctx.trello.moveCard(job.cardId, lists.needsHuman);
+        if (outcome.prUrl) await ctx.trello.attachUrl(job.cardId, outcome.prUrl, `Draft PR #${outcome.prNumber}`);
+        const draft = outcome.prUrl ? `\nDraft PR (work preserved): ${outcome.prUrl}` : "";
+        const codex = outcome.codex?.output ? `\n\nCodex:\n${outcome.codex.output.slice(0, 1500)}` : "";
+        await ctx.trello.commentCard(job.cardId, ctx.redact(`❌ Could not complete: ${outcome.reason}${draft}${codex}`).slice(0, 16000));
+        await ctx.telegram.send(
+          ctx.redact(`<b>Needs human</b> ⚠️\n${escapeHtml(card.name)}\n${escapeHtml(outcome.reason ?? "")}${outcome.prUrl ? `\nDraft: ${outcome.prUrl}` : ""}`),
+        );
+      } catch (e) {
+        log(`failure recorded but reporting failed (check the board): ${e instanceof Error ? e.message : e}`);
+      }
       log(`failed → ${outcome.reason}${outcome.prUrl ? ` (draft ${outcome.prUrl})` : ""}`);
     }
   } catch (err) {

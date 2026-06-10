@@ -224,12 +224,18 @@ export class StateStore {
       .run(state, nowMs, key.cardId, key.contentHash);
   }
 
-  markRunning(key: JobKey, runId: string, branch: string, nowMs: number): void {
-    this.db
+  /**
+   * claimed → running, extending the lease to cover a FULL run (the claim lease only
+   * covers claim→start). Guarded on state='claimed' so a reclaimed/abandoned job can
+   * never be resurrected. Returns false if the job was no longer claimed.
+   */
+  markRunning(key: JobKey, runId: string, branch: string, nowMs: number, leaseMs: number): boolean {
+    const res = this.db
       .prepare(
-        "UPDATE jobs SET state='running', run_id=?, branch=?, updated_at=? WHERE card_id=? AND content_hash=?",
+        "UPDATE jobs SET state='running', run_id=?, branch=?, lease_until=?, updated_at=? WHERE card_id=? AND content_hash=? AND state='claimed'",
       )
-      .run(runId, branch, nowMs, key.cardId, key.contentHash);
+      .run(runId, branch, nowMs + leaseMs, nowMs, key.cardId, key.contentHash);
+    return res.changes > 0;
   }
 
   markPrOpen(key: JobKey, prUrl: string, prNumber: number, costUsd: number, nowMs: number): void {

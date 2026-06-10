@@ -21,7 +21,6 @@ import process from "node:process";
 import { run, ok, scopedEnv, type RunResult } from "./exec.ts";
 import { parseClaudeStream, isBudgetExceeded } from "./claudeResult.ts";
 import { runCodexReview, type CodexVerdict } from "./codexReview.ts";
-import { redactSecrets } from "./redact.ts";
 import type { RepoConfig } from "./config.ts";
 import { acceptanceCriteria, type TrelloCard } from "./trello.ts";
 
@@ -201,6 +200,8 @@ function toolArg(input: unknown): string {
 
 export interface RunDeps {
   log: (msg: string) => void;
+  /** Masks credentials (known secret values + generic patterns) in outbound text. */
+  redact: (s: string) => string;
 }
 
 export async function runCard(
@@ -243,7 +244,12 @@ export async function runCard(
     if (status.stdout.trim()) {
       return fail("working tree not clean — in-folder mode needs a clean checkout (commit or stash your changes first)");
     }
-    await run("git", ["-C", repoPath, "fetch", "origin", base], { timeoutMs: 120_000 });
+    const fetched = await run("git", ["-C", repoPath, "fetch", "origin", base], { timeoutMs: 120_000 });
+    if (!ok(fetched)) {
+      // A failed fetch would leave origin/<base> stale — branching from it silently
+      // builds on outdated code, so fail loud instead.
+      return fail(`git fetch origin ${base} failed: ${fetched.stderr.slice(0, 200)}`);
+    }
     const co = await run("git", ["-C", repoPath, "checkout", "-B", branch, `origin/${base}`], { timeoutMs: 60_000 });
     if (!ok(co)) return fail(`checkout -B failed: ${co.stderr.slice(0, 200)}`);
     switched = true;
@@ -302,7 +308,7 @@ export async function runCard(
       if (!ok(p)) return { error: `push failed: ${p.stderr.slice(0, 200)}` };
       // The body carries worker notes + Codex output + command tails — untrusted text
       // bound for a semi-public PR. Redact any credential-shaped content before it leaves.
-      const args = ["pr", "create", "--title", redactSecrets(title), "--body", redactSecrets(body).slice(0, 60_000), "--base", base, "--head", branch];
+      const args = ["pr", "create", "--title", deps.redact(title), "--body", deps.redact(body).slice(0, 60_000), "--base", base, "--head", branch];
       if (draft) args.push("--draft");
       const pr = await run("gh", args, { cwd: repoPath, timeoutMs: 60_000 });
       const parsed = parsePrUrl(pr.stdout + pr.stderr);

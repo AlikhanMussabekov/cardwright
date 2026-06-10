@@ -8,6 +8,7 @@ import {
   maxActionId,
   imageAttachments,
   isTrelloCredentialHost,
+  retryAfterSeconds,
   type TrelloAction,
   type TrelloCard,
   type TrelloAttachment,
@@ -105,4 +106,12 @@ test("maxActionId returns the highest id or null", () => {
     "a5",
   );
   assert.equal(maxActionId([]), null);
+});
+
+test("retryAfterSeconds honors the header, clamps to >=1s, defaults to 2s", () => {
+  assert.equal(retryAfterSeconds(null), 2); // header absent
+  assert.equal(retryAfterSeconds(""), 2);
+  assert.equal(retryAfterSeconds("5"), 5);
+  assert.equal(retryAfterSeconds("0"), 1); // Retry-After: 0 must still back off
+  assert.equal(retryAfterSeconds("Thu, 01 Jan 2026 00:00:00 GMT"), 2); // HTTP-date form → default
 });

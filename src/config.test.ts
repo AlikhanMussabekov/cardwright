@@ -59,6 +59,12 @@ test("throws on an invalid deployMode", () => {
   assert.throws(() => parseConfig(raw), /deployMode/);
 });
 
+test("throws on an invalid mergeMethod", () => {
+  const raw = validRaw();
+  raw.repos["org/repo"].mergeMethod = "yolo";
+  assert.throws(() => parseConfig(raw), /mergeMethod/);
+});
+
 test("auto-merge requires branch protection + required checks (earned gate)", () => {
   const raw = validRaw();
   raw.repos["org/repo"].autoMerge = true;
